@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vault - Distributed Object Storage</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: Arial, sans-serif; background: #f4f7fb; color: #172033;
+  }
+  header {
+    background: #172554; color: white; padding: 22px 7%;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  header h1 { margin: 0; font-size: 28px; }
+  header span { opacity: .85; }
+  main { width: 86%; max-width: 1100px; margin: 28px auto; }
+  .hero, .panel {
+    background: white; border-radius: 16px; padding: 22px; margin-bottom: 20px;
+    box-shadow: 0 5px 20px rgba(0,0,0,.07);
+  }
+  .hero h2 { margin-top: 0; }
+  .hero p { line-height: 1.55; color: #526078; }
+  .upload { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  input[type=file] { max-width: 260px; }
+  button {
+    border: 0; border-radius: 9px; padding: 10px 16px; cursor:pointer;
+    background:#2563eb; color:white; font-weight:600;
+  }
+  button.danger { background:#dc2626; }
+  button.secondary { background:#475569; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .nodes { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; }
+  .node { border:1px solid #dbe3ef; border-radius:13px; padding:17px; }
+  .node h3 { margin:0 0 8px; }
+  .status { font-weight:700; }
+  .online { color:#15803d; } .offline { color:#b91c1c; }
+  .bar { height:9px; background:#e5e7eb; border-radius:8px; overflow:hidden; margin:10px 0; }
+  .fill { height:100%; width:35%; background:#2563eb; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .stat { background:#eef4ff; padding:15px; border-radius:12px; }
+  .stat b { display:block; font-size:24px; margin-top:5px; }
+  #log { max-height:220px; overflow:auto; font-family:monospace; background:#0f172a; color:#dbeafe; padding:14px; border-radius:10px; }
+  .file { padding:10px 0; border-bottom:1px solid #e5e7eb; }
+  @media(max-width:700px) {
+    .nodes,.stats { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔐 VAULT</h1>
+  <span>Fault-Tolerant Distributed Object Storage</span>
+</header>
+
+<main>
+  <section class="hero">
+    <h2>Store once. Survive failures.</h2>
+    <p>
+      Vault demonstrates how a distributed storage system keeps multiple replicas of data.
+      If a storage node fails, the system detects the failure and repairs the missing replica.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>📁 Upload Object</h2>
+    <div class="upload">
+      <input id="fileInput" type="file">
+      <button onclick="uploadFile()">Upload & Replicate</button>
+    </div>
+    <div id="files"></div>
+  </section>
+
+  <section class="panel">
+    <h2>🖥️ Storage Nodes</h2>
+    <div class="nodes" id="nodes"></div>
+  </section>
+
+  <section class="panel">
+    <h2>📊 System Status</h2>
+    <div class="stats">
+      <div class="stat">Objects <b id="objectCount">0</b></div>
+      <div class="stat">Replication <b>3×</b></div>
+      <div class="stat">Failed Nodes <b id="failedCount">0</b></div>
+      <div class="stat">Repairs <b id="repairCount">0</b></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>⚙️ Event Log</h2>
+    <div id="log">[SYSTEM] Vault initialized. All nodes healthy.</div>
+  </section>
+</main>
+
+<script>
+const nodes = [
+  {id:1, online:true, files:[]},
+  {id:2, online:true, files:[]},
+  {id:3, online:true, files:[]}
+];
+let objects = [];
+let repairs = 0;
+
+function log(msg) {
+  const el = document.getElementById("log");
+  el.innerHTML += "<br>" + msg;
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderNodes() {
+  const box = document.getElementById("nodes");
+  box.innerHTML = "";
+  nodes.forEach(n => {
+    const div = document.createElement("div");
+    div.className = "node";
+    div.innerHTML = `
+      <h3>Node ${n.id}</h3>
+      <div class="status ${n.online ? 'online':'offline'}">
+        ${n.online ? '● ONLINE' : '● FAILED'}
+      </div>
+      <div>Stored replicas: ${n.files.length}</div>
+      <div class="bar"><div class="fill" style="width:${Math.min(100, n.files.length*18+15)}%"></div></div>
+      <button class="${n.online ? 'danger':'secondary'}"
+        onclick="toggleNode(${n.id})">
+        ${n.online ? 'Simulate Failure' : 'Recover & Repair'}
+      </button>
+    `;
+    box.appendChild(div);
+  });
+  document.getElementById("failedCount").textContent =
+    nodes.filter(n=>!n.online).length;
+}
+
+function renderFiles() {
+  const box = document.getElementById("files");
+  if (!objects.length) {
+    box.innerHTML = "<p>No objects stored yet.</p>";
+    return;
+  }
+  box.innerHTML = objects.map(o =>
+    <div class="file">📄 <b>${o.name}</b> — replicas: ${o.replicas.join(", ")}</div>
+  ).join("");
+  document.getElementById("objectCount").textContent = objects.length;
+}
+
+function uploadFile() {
+  const input = document.getElementById("fileInput");
+  if (!input.files.length) {
+    alert("Choose a file first.");
+    return;
+  }
+  const name = input.files[0].name;
+  const online = nodes.filter(n=>n.online);
+  if (online.length < 2) {
+    alert("Not enough healthy nodes for replication.");
+    return;
+  }
+  const replicas = online.slice(0, Math.min(3, online.length)).map(n=>n.id);
+  replicas.forEach(id => nodes[id-1].files.push(name));
+  objects.push({name, replicas});
+  log([UPLOAD] ${name} replicated to Node ${replicas.join(", ")});
+  renderNodes(); renderFiles();
+  input.value = "";
+}
+
+function toggleNode(id) {
+  const node = nodes[id-1];
+  if (node.online) {
+    node.online = false;
+    log([FAILURE] Node ${id} is unavailable.);
+    objects.forEach(o => {
+      o.replicas = o.replicas.filter(x => x !== id);
+    });
+    renderNodes(); renderFiles();
+  } else {
+    node.online = true;
+    log([RECOVERY] Node ${id} is back online. Starting automatic replica repair...);
+    setTimeout(() => {
+      objects.forEach(o => {
+        if (!o.replicas.includes(id)) {
+          node.files.push(o.name);
+          o.replicas.push(id);
+          repairs++;
+          log([REPAIR] ${o.name} restored to Node ${id}.);
+        }
+      });
+      document.getElementById("repairCount").textContent = repairs;
+      renderNodes(); renderFiles();
+    }, 700);
+  }
+}
+
+renderNodes();
+renderFiles();
+</script>
+</body>
+</html>
